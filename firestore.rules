@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// This app uses its own username/password login (checked in-app against the
+// "users" collection) rather than Firebase Auth accounts per person. Every
+// visitor is silently signed in anonymously just so these rules have
+// `request.auth != null` to gate on — it stops completely anonymous internet
+// traffic that never loaded the app, but it does NOT distinguish between
+// your admin, director, and RAs at the database level. That distinction is
+// enforced in the app's UI only.
+//
+// Known limitation: because this is a static site with no server, these
+// rules can't verify *who* is writing, only *that* the request came from
+// someone who loaded the app. For a small internal pilot this is a
+// reasonable tradeoff. For a wider rollout, consider migrating auth to
+// real Firebase Authentication (one account per person) and rewriting
+// these rules to check request.auth.token / custom claims per role.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read, write: if request.auth != null;
+    }
+    match /submissions/{submissionId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
