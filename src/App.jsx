@@ -771,12 +771,14 @@ function RecordsTable({ submissions, users, session, scope, onReview }) {
 }
 
 /* ============================== MANAGE USERS (ADMIN) ============================== */
-function ManageUsers({ users, onCreate, onToggleActive, onResetPassword, onDelete, currentUsername }) {
+function ManageUsers({ users, onCreate, onToggleActive, onResetPassword, onDelete, currentUsername, submissionCount, onClearSubmissions }) {
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [role, setRole] = useState("ra");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [clearing, setClearing] = useState(false);
 
   const genPassword = () => {
     const p = Math.random().toString(36).slice(-4) + Math.random().toString(36).slice(-4).toUpperCase();
@@ -860,6 +862,33 @@ function ManageUsers({ users, onCreate, onToggleActive, onResetPassword, onDelet
           </tbody>
         </table>
       </div>
+
+      {onClearSubmissions && (
+        <div className="rounded-xl p-5" style={{ backgroundColor: C.dangerSoft, border: `1px solid ${C.danger}55` }}>
+          <h3 className="text-sm font-semibold mb-1 flex items-center gap-2" style={{ color: C.danger }}><AlertTriangle size={16} /> Danger zone</h3>
+          <p className="text-sm mb-3" style={{ color: "#5A1E1E" }}>
+            Permanently delete all {submissionCount} questionnaire submission{submissionCount === 1 ? "" : "s"} currently in the database \u2014 for example, to clear out demo/test entries before real data collection begins. Participant ID numbering will restart from 001 afterwards. This does not delete any user accounts. This cannot be undone.
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <Field label='Type "DELETE" to confirm'>
+              <TextInput value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="DELETE" />
+            </Field>
+            <button
+              disabled={confirmText !== "DELETE" || clearing || submissionCount === 0}
+              onClick={async () => {
+                setClearing(true);
+                await onClearSubmissions();
+                setClearing(false);
+                setConfirmText("");
+              }}
+              className="h-[38px] px-4 rounded-md text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40"
+              style={{ backgroundColor: C.danger, color: "#fff" }}
+            >
+              <Trash2 size={15} /> {clearing ? "Deleting\u2026" : `Delete all ${submissionCount} submissions`}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1312,6 +1341,15 @@ export default function TemaQIApp() {
     try { await updateDoc(doc(db, "submissions", id), { reviewed }); }
     catch (e) { console.warn(e); showToast("Could not update that record.", "error"); }
   }
+  async function handleClearAllSubmissions() {
+    try {
+      await Promise.all(submissions.map((s) => deleteDoc(doc(db, "submissions", s.id))));
+      showToast(`Deleted ${submissions.length} submission${submissions.length === 1 ? "" : "s"}. Participant IDs will restart from 001.`);
+    } catch (e) {
+      console.warn(e);
+      showToast("Could not delete all submissions \u2014 check your connection and try again.", "error");
+    }
+  }
 
   if (!ready) {
     return (
@@ -1334,7 +1372,7 @@ export default function TemaQIApp() {
         <RecordsTable submissions={submissions} users={users} session={session} scope="all" onReview={session.role === "admin" ? handleReview : session.role === "director" ? handleReview : null} />
       )}
       {page === "users" && session.role === "admin" && (
-        <ManageUsers users={users} onCreate={handleCreateUser} onToggleActive={handleToggleActive} onResetPassword={handleResetPassword} onDelete={handleDeleteUser} currentUsername={session.username} />
+        <ManageUsers users={users} onCreate={handleCreateUser} onToggleActive={handleToggleActive} onResetPassword={handleResetPassword} onDelete={handleDeleteUser} currentUsername={session.username} submissionCount={submissions.length} onClearSubmissions={handleClearAllSubmissions} />
       )}
       {page === "ra-dashboard" && session.role === "ra" && (
         <RADashboard submissions={submissions} session={session} setPage={setPage} />
