@@ -8,7 +8,7 @@ import {
   LogIn, LogOut, Users, ClipboardList, BarChart3, Download, Plus,
   AlertTriangle, CheckCircle2, Shield, ChevronRight, ChevronLeft,
   Trash2, RefreshCw, UserPlus, Activity, X, KeyRound, ClipboardCheck,
-  Eye, EyeOff, FileWarning,
+  Eye, EyeOff, FileWarning, ChevronDown, ChevronUp, Info, Timer, BookOpenCheck,
 } from "lucide-react";
 import { auth, db } from "./firebase";
 import { signInAnonymously } from "firebase/auth";
@@ -58,15 +58,15 @@ const SOCIAL_SUPPORT = ["Very good", "Good", "Fair", "Poor", "Very poor"];
 const FUNCTIONAL_IMPAIRMENT = ["Not difficult at all", "Somewhat difficult", "Very difficult", "Extremely difficult"];
 
 const PHQ_ITEMS = [
-  "Little interest or pleasure in doing things",
-  "Feeling down, depressed, or hopeless",
-  "Trouble falling or staying asleep, or sleeping too much",
-  "Feeling tired or having little energy",
-  "Poor appetite or overeating",
-  "Feeling bad about yourself \u2014 or that you are a failure or have let yourself or your family down",
-  "Trouble concentrating on things, such as reading, watching TV, or completing daily tasks",
-  "Moving or speaking so slowly that other people could have noticed \u2014 or being so fidgety or restless that you are moving around much more than usual",
-  "Thoughts that you would be better off dead, or thoughts of hurting yourself in some way",
+  { text: "Little interest or pleasure in doing things", desc: "Anhedonia \u2014 loss of enjoyment in activities you used to enjoy" },
+  { text: "Feeling down, depressed, or hopeless", desc: "Persistent sad mood or feelings of emptiness" },
+  { text: "Trouble falling or staying asleep, or sleeping too much", desc: "Insomnia or hypersomnia nearly every night" },
+  { text: "Feeling tired or having little energy", desc: "Fatigue or loss of energy most of the time" },
+  { text: "Poor appetite or overeating", desc: "Significant change in appetite \u2014 eating much less or much more than usual" },
+  { text: "Feeling bad about yourself \u2014 or that you are a failure or have let yourself or your family down", desc: "Feelings of worthlessness or excessive/inappropriate guilt" },
+  { text: "Trouble concentrating on things, such as reading, watching TV, or completing daily tasks", desc: "Diminished ability to think, concentrate, or make decisions" },
+  { text: "Moving or speaking so slowly that other people could have noticed \u2014 or being so fidgety or restless that you are moving around much more than usual", desc: "Psychomotor retardation or agitation observable by others" },
+  { text: "Thoughts that you would be better off dead, or thoughts of hurting yourself in some way", desc: "Suicidal ideation or self-harm thoughts \u2014 FLAG IMMEDIATELY if score \u2265 1" },
 ];
 const PHQ_SCALE = [
   { v: 0, label: "Not at all" },
@@ -83,6 +83,15 @@ function phqSeverity(total) {
   return "Severe";
 }
 
+// Reference table for RAs — shown during and after PHQ-9 administration.
+const SEVERITY_ACTION_GUIDE = [
+  { min: 0, max: 4, range: "0\u20134", severity: "Minimal / None", action: "Reassure; provide mental health education leaflet", referral: "Re-screen in 6 months", urgency: "Routine" },
+  { min: 5, max: 9, range: "5\u20139", severity: "Mild", action: "Watchful waiting; psychoeducation; lifestyle advice", referral: "Re-screen in 4 weeks", urgency: "Monitor" },
+  { min: 10, max: 14, range: "10\u201314", severity: "Moderate", action: "Refer to Mental Health Officer; consider CBT/counselling", referral: "Within 2 weeks", urgency: "2 Weeks" },
+  { min: 15, max: 19, range: "15\u201319", severity: "Moderately Severe", action: "Active treatment: antidepressant + therapy; safety plan", referral: "Within 1 week", urgency: "1 Week" },
+  { min: 20, max: 27, range: "20\u201327", severity: "Severe", action: "Immediate psychiatric review; safety assessment; do not discharge alone", referral: "Same day", urgency: "URGENT" },
+];
+
 /* ============================== HELPERS ============================== */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -93,6 +102,17 @@ const fmtDate = (iso) => {
 const fmtDateTime = (iso) => {
   try { return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
   catch { return iso; }
+};
+const fmtTime = (iso) => {
+  try { return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+  catch { return iso; }
+};
+const formatDuration = (totalSeconds) => {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  if (m === 0) return `${sec}s`;
+  return `${m}m ${sec}s`;
 };
 
 // Passwords are never stored in plain text — only a SHA-256 hash is written to Firestore.
@@ -325,6 +345,9 @@ function exportToExcel(submissions, users, filenamePrefix = "TUH_QI_Data") {
     "Referral Made": s.referralMade,
     "Action Taken / Notes": s.actionTaken,
     "Reviewed by Supervisor": s.reviewed ? "Yes" : "No",
+    "Interview Started At": s.administrationStartedAt ? fmtDateTime(s.administrationStartedAt) : "",
+    "Interview Ended At": s.administrationEndedAt ? fmtDateTime(s.administrationEndedAt) : "",
+    "Interview Duration": s.administrationDurationLabel || "",
     "Submitted At": s.submittedAt,
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -681,6 +704,46 @@ function EmptyState({ icon: Icon, title, body, action }) {
   );
 }
 
+function SeverityActionGuide({ highlightScore }) {
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs sm:text-sm">
+          <thead>
+            <tr style={{ backgroundColor: C.surfaceAlt }}>
+              {["Score", "Severity", "Recommended Action", "Referral Pathway", "Urgency"].map((h) => (
+                <th key={h} className="text-left px-3 py-2 font-semibold whitespace-nowrap" style={{ color: C.inkSoft }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {SEVERITY_ACTION_GUIDE.map((row) => {
+              const active = typeof highlightScore === "number" && highlightScore >= row.min && highlightScore <= row.max;
+              return (
+                <tr
+                  key={row.range}
+                  style={{
+                    borderTop: `1px solid ${C.border}`,
+                    backgroundColor: active ? C.goldSoft : C.surface,
+                  }}
+                >
+                  <td className="px-3 py-2 font-semibold whitespace-nowrap" style={{ color: active ? "#6B4E12" : C.ink }}>{row.range}{active && " \u2190"}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <Badge color="#fff" bg={SEV[row.severity === "Minimal / None" ? "Minimal" : row.severity === "Moderately Severe" ? "Moderately severe" : row.severity] || C.inkSoft}>{row.severity}</Badge>
+                  </td>
+                  <td className="px-3 py-2" style={{ color: C.inkSoft }}>{row.action}</td>
+                  <td className="px-3 py-2 whitespace-nowrap" style={{ color: C.inkSoft }}>{row.referral}</td>
+                  <td className="px-3 py-2 whitespace-nowrap font-semibold" style={{ color: row.urgency === "URGENT" ? C.danger : C.inkSoft }}>{row.urgency}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /* ============================== RECORDS TABLE ============================== */
 function RecordsTable({ submissions, users, session, scope, onReview }) {
   const [q, setQ] = useState("");
@@ -723,7 +786,7 @@ function RecordsTable({ submissions, users, session, scope, onReview }) {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ backgroundColor: C.surfaceAlt }}>
-                  {["Participant ID", "Date", "RA", "Age/Sex", "PHQ-9", "Severity", "Flag", "Reviewed"].map((h) => (
+                  {["Participant ID", "Date", "RA", "Age/Sex", "PHQ-9", "Severity", "Duration", "Flag", "Reviewed"].map((h) => (
                     <th key={h} className="text-left px-4 py-2.5 font-semibold whitespace-nowrap" style={{ color: C.inkSoft }}>{h}</th>
                   ))}
                 </tr>
@@ -739,6 +802,7 @@ function RecordsTable({ submissions, users, session, scope, onReview }) {
                     <td className="px-4 py-2.5">
                       <Badge color="#fff" bg={SEV[s.phqSeverity] || C.inkSoft}>{s.phqSeverity}</Badge>
                     </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap" style={{ color: C.inkSoft }}>{s.administrationDurationLabel || "\u2014"}</td>
                     <td className="px-4 py-2.5">
                       {s.safetyFlag ? <Badge color={C.danger} bg={C.dangerSoft}>Flagged</Badge> : <span style={{ color: C.inkSoft }}>—</span>}
                     </td>
@@ -867,7 +931,7 @@ function ManageUsers({ users, onCreate, onToggleActive, onResetPassword, onDelet
         <div className="rounded-xl p-5" style={{ backgroundColor: C.dangerSoft, border: `1px solid ${C.danger}55` }}>
           <h3 className="text-sm font-semibold mb-1 flex items-center gap-2" style={{ color: C.danger }}><AlertTriangle size={16} /> Danger zone</h3>
           <p className="text-sm mb-3" style={{ color: "#5A1E1E" }}>
-            Permanently delete all {submissionCount} questionnaire submission{submissionCount === 1 ? "" : "s"} currently in the database \u2014 for example, to clear out demo/test entries before real data collection begins. Participant ID numbering will restart from 001 afterwards. This does not delete any user accounts. This cannot be undone.
+            Permanently delete all {submissionCount} questionnaire submission{submissionCount === 1 ? "" : "s"} currently in the database — for example, to clear out demo/test entries before real data collection begins. Participant ID numbering will restart from 001 afterwards. This does not delete any user accounts. This cannot be undone.
           </p>
           <div className="flex flex-wrap items-end gap-2">
             <Field label='Type "DELETE" to confirm'>
@@ -989,6 +1053,15 @@ function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
     const n = submissions.filter((s) => s.raUsername === session.username).length + 1;
     return { ...BLANK_FORM, participantId: `TUH-${String(n).padStart(4, "0")}` };
   });
+  const [startedAt] = useState(() => new Date().toISOString());
+  const [nowTick, setNowTick] = useState(Date.now());
+  const [showGuide, setShowGuide] = useState(false);
+
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const setPhq = (i, v) => setF((p) => { const phq = [...p.phq]; phq[i] = v; return { ...p, phq }; });
 
@@ -996,17 +1069,23 @@ function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
   const phqAnswered = f.phq.every((v) => typeof v === "number");
   const safetyFlag = typeof f.phq[8] === "number" && f.phq[8] >= 1;
   const severity = phqAnswered ? phqSeverity(phqTotal) : null;
+  const elapsedSeconds = Math.floor((nowTick - new Date(startedAt).getTime()) / 1000);
+
+  const ageNum = f.age !== "" ? Number(f.age) : null;
+  const underage = ageNum !== null && !Number.isNaN(ageNum) && ageNum < 18;
 
   const steps = ["Visit Info", "Demographics", "Clinical History", "PHQ-9 Screening", "Review & Submit"];
 
   const canNext = () => {
     if (step === 0) return f.participantId.trim() && f.visitDate;
-    if (step === 1) return f.age && f.sex;
+    if (step === 1) return f.age && f.sex && !underage;
     if (step === 3) return phqAnswered && f.functionalImpairment;
     return true;
   };
 
   const submit = () => {
+    const endedAt = new Date().toISOString();
+    const durationSeconds = Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000);
     const record = {
       ...f,
       raUsername: session.username,
@@ -1014,16 +1093,25 @@ function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
       phqSeverity: severity,
       safetyFlag,
       reviewed: false,
-      submittedAt: new Date().toISOString(),
+      administrationStartedAt: startedAt,
+      administrationEndedAt: endedAt,
+      administrationDurationSeconds: durationSeconds,
+      administrationDurationLabel: formatDuration(durationSeconds),
+      submittedAt: endedAt,
     };
     onSubmit(record);
   };
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h2 className="text-2xl font-serif" style={{ color: C.ink }}>New Questionnaire</h2>
-        <button onClick={onCancel} className="text-sm font-medium flex items-center gap-1" style={{ color: C.inkSoft }}><X size={15} /> Cancel</button>
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: C.primarySoft, color: C.primaryDark }}>
+            <Timer size={13} /> {formatDuration(elapsedSeconds)} elapsed
+          </span>
+          <button onClick={onCancel} className="text-sm font-medium flex items-center gap-1" style={{ color: C.inkSoft }}><X size={15} /> Cancel</button>
+        </div>
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -1049,22 +1137,32 @@ function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
         )}
 
         {step === 1 && (
-          <div className="grid sm:grid-cols-2 gap-x-4">
-            <Field label="Age (completed years)" required><TextInput type="number" min="0" value={f.age} onChange={(e) => set("age", e.target.value)} /></Field>
-            <Field label="Date of birth (if known)"><TextInput type="date" value={f.dob} onChange={(e) => set("dob", e.target.value)} /></Field>
-            <Field label="Sex" required><RadioRow options={["Male", "Female", "Other / Prefer not to say"]} value={f.sex} onChange={(v) => set("sex", v)} /></Field>
-            <Field label="Highest level of education"><SelectField value={f.education} onChange={(v) => set("education", v)} options={EDUCATION} /></Field>
-            <Field label="Employment status"><SelectField value={f.employment} onChange={(v) => set("employment", v)} options={EMPLOYMENT} /></Field>
-            <Field label="Marital status"><SelectField value={f.marital} onChange={(v) => set("marital", v)} options={MARITAL} /></Field>
-            <Field label="Monthly household income (approx.)"><SelectField value={f.income} onChange={(v) => set("income", v)} options={INCOME} /></Field>
-            <Field label="Ethnicity / Tribe">
-              <SelectField value={f.ethnicity} onChange={(v) => set("ethnicity", v)} options={ETHNICITY} />
-              {f.ethnicity === "Other" && <div className="mt-2"><TextInput placeholder="Specify" value={f.ethnicityOther} onChange={(e) => set("ethnicityOther", e.target.value)} /></div>}
-            </Field>
-            <Field label="Religion">
-              <SelectField value={f.religion} onChange={(v) => set("religion", v)} options={RELIGION} />
-              {f.religion === "Other" && <div className="mt-2"><TextInput placeholder="Specify" value={f.religionOther} onChange={(e) => set("religionOther", e.target.value)} /></div>}
-            </Field>
+          <div>
+            <div className="grid sm:grid-cols-2 gap-x-4">
+              <Field label="Age (completed years)" required><TextInput type="number" min="0" value={f.age} onChange={(e) => set("age", e.target.value)} /></Field>
+              <Field label="Date of birth (if known)"><TextInput type="date" value={f.dob} onChange={(e) => set("dob", e.target.value)} /></Field>
+              <Field label="Sex" required><RadioRow options={["Male", "Female", "Other / Prefer not to say"]} value={f.sex} onChange={(v) => set("sex", v)} /></Field>
+              <Field label="Highest level of education"><SelectField value={f.education} onChange={(v) => set("education", v)} options={EDUCATION} /></Field>
+              <Field label="Employment status"><SelectField value={f.employment} onChange={(v) => set("employment", v)} options={EMPLOYMENT} /></Field>
+              <Field label="Marital status"><SelectField value={f.marital} onChange={(v) => set("marital", v)} options={MARITAL} /></Field>
+              <Field label="Monthly household income (approx.)"><SelectField value={f.income} onChange={(v) => set("income", v)} options={INCOME} /></Field>
+              <Field label="Ethnicity / Tribe">
+                <SelectField value={f.ethnicity} onChange={(v) => set("ethnicity", v)} options={ETHNICITY} />
+                {f.ethnicity === "Other" && <div className="mt-2"><TextInput placeholder="Specify" value={f.ethnicityOther} onChange={(e) => set("ethnicityOther", e.target.value)} /></div>}
+              </Field>
+              <Field label="Religion">
+                <SelectField value={f.religion} onChange={(v) => set("religion", v)} options={RELIGION} />
+                {f.religion === "Other" && <div className="mt-2"><TextInput placeholder="Specify" value={f.religionOther} onChange={(e) => set("religionOther", e.target.value)} /></div>}
+              </Field>
+            </div>
+            {underage && (
+              <div className="mt-2 rounded-lg p-4 flex items-start gap-3" style={{ backgroundColor: C.dangerSoft, border: `1.5px solid ${C.danger}` }}>
+                <AlertTriangle size={20} color={C.danger} className="mt-0.5 shrink-0" />
+                <div className="text-sm" style={{ color: "#5A1E1E" }}>
+                  <b>This participant is not eligible.</b> This questionnaire is for participants aged 18 years and older only. Do not continue the interview — thank the participant and, if clinically appropriate, refer them to an age-appropriate service.
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1096,7 +1194,7 @@ function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
 
         {step === 3 && (
           <div>
-            <p className="text-sm mb-4" style={{ color: C.inkSoft }}>Over the past 2 weeks, how often has the participant been bothered by the following problems?</p>
+            <p className="text-sm mb-4" style={{ color: C.inkSoft }}>Over the past 2 weeks, how often has the participant been bothered by the following problems? Read each item aloud, then use the description in italics if the participant needs it explained in plain terms.</p>
             {safetyFlag && (
               <div className="mb-5 rounded-lg p-4 flex items-start gap-3" style={{ backgroundColor: C.dangerSoft, border: `1.5px solid ${C.danger}` }}>
                 <AlertTriangle size={20} color={C.danger} className="mt-0.5 shrink-0" />
@@ -1108,8 +1206,12 @@ function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
             <div className="space-y-4">
               {PHQ_ITEMS.map((item, i) => (
                 <div key={i} className="pb-4" style={{ borderBottom: i < 8 ? `1px solid ${C.border}` : "none" }}>
-                  <div className="text-sm font-medium mb-2" style={{ color: C.ink }}>
-                    {i + 1}. {item} {i === 8 && <Shield size={13} color={C.danger} className="inline ml-1" />}
+                  <div className="text-sm font-medium mb-1" style={{ color: C.ink }}>
+                    {i + 1}. {item.text} {i === 8 && <Shield size={13} color={C.danger} className="inline ml-1" />}
+                  </div>
+                  <div className="text-xs italic mb-2 flex items-start gap-1.5" style={{ color: C.inkSoft }}>
+                    <Info size={12} className="mt-0.5 shrink-0" />
+                    <span>{item.desc}</span>
                   </div>
                   <RadioRow options={PHQ_SCALE.map((s) => s.label)} value={PHQ_SCALE.find((s) => s.v === f.phq[i])?.label} onChange={(label) => setPhq(i, PHQ_SCALE.find((s) => s.label === label).v)} />
                 </div>
@@ -1117,11 +1219,22 @@ function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
             </div>
             <div className="mt-2 flex items-center justify-between rounded-lg px-4 py-3" style={{ backgroundColor: C.surfaceAlt }}>
               <span className="text-sm font-semibold" style={{ color: C.ink }}>Running total</span>
-              <span className="text-lg font-serif" style={{ color: C.ink }}>{phqTotal} / 27 {severity && <Badge color="#fff" bg={SEV[severity]}>{severity}</Badge>}</span>
+              <span className="text-lg font-serif flex items-center gap-2" style={{ color: C.ink }}>{phqTotal} / 27 {phqTotal > 0 && <Badge color="#fff" bg={SEV[phqSeverity(phqTotal)]}>{phqSeverity(phqTotal)}</Badge>}</span>
             </div>
-            <Field label="Q10. If any problems were checked, how difficult have they made it to work, manage things at home, or get along with others?" required>
-              <RadioRow options={FUNCTIONAL_IMPAIRMENT} value={f.functionalImpairment} onChange={(v) => set("functionalImpairment", v)} />
-            </Field>
+            <button
+              type="button"
+              onClick={() => setShowGuide((s) => !s)}
+              className="mt-3 flex items-center gap-1.5 text-sm font-semibold"
+              style={{ color: C.primary }}
+            >
+              <BookOpenCheck size={15} /> Severity &amp; action guide {showGuide ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
+            {showGuide && <div className="mt-2"><SeverityActionGuide highlightScore={phqTotal} /></div>}
+            <div className="mt-5">
+              <Field label="Q10. If any problems were checked, how difficult have they made it to work, manage things at home, or get along with others?" required>
+                <RadioRow options={FUNCTIONAL_IMPAIRMENT} value={f.functionalImpairment} onChange={(v) => set("functionalImpairment", v)} />
+              </Field>
+            </div>
           </div>
         )}
 
@@ -1136,8 +1249,16 @@ function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
                 <div><b>PHQ-9 Total:</b> {phqTotal} / 27</div>
                 <div><b>Severity:</b> <Badge color="#fff" bg={SEV[severity] || C.inkSoft}>{severity}</Badge></div>
                 <div><b>Safety flag:</b> {safetyFlag ? <span style={{ color: C.danger, fontWeight: 700 }}>YES</span> : "No"}</div>
+                <div><b>Started:</b> {fmtTime(startedAt)}</div>
+                <div><b>Time so far:</b> {formatDuration(elapsedSeconds)} (ends when you submit)</div>
               </div>
             </div>
+
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide mb-2 flex items-center gap-1.5" style={{ color: C.inkSoft }}><BookOpenCheck size={13} /> Severity &amp; action guide</div>
+              <SeverityActionGuide highlightScore={phqTotal} />
+            </div>
+
             {safetyFlag && (
               <div className="rounded-lg p-4" style={{ backgroundColor: C.dangerSoft, border: `1px solid ${C.danger}55` }}>
                 <div className="text-sm font-semibold mb-1" style={{ color: C.danger }}>Confirm safety protocol before submitting</div>
