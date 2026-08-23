@@ -503,6 +503,28 @@ function Shell({ session, page, setPage, onLogout, children, flagCount }) {
 }
 
 /* ============================== ANALYTICS DASHBOARD ============================== */
+/* ============================== ANALYTICS HELPERS ============================== */
+function countBy(list, getter) {
+  const counts = {};
+  list.forEach((item) => {
+    const v = getter(item);
+    if (v === undefined || v === null || v === "") return;
+    counts[v] = (counts[v] || 0) + 1;
+  });
+  return counts;
+}
+function countMultiBy(list, getter) {
+  const counts = {};
+  list.forEach((item) => {
+    (getter(item) || []).forEach((v) => { counts[v] = (counts[v] || 0) + 1; });
+  });
+  return counts;
+}
+function toChartData(counts, order) {
+  if (order) return order.map((name) => ({ name, value: counts[name] || 0 }));
+  return Object.entries(counts).map(([name, value]) => ({ name, value }));
+}
+
 function AnalyticsDashboard({ submissions, users }) {
   const total = submissions.length;
   const todayCount = submissions.filter((s) => s.visitDate === todayISO()).length;
@@ -525,14 +547,13 @@ function AnalyticsDashboard({ submissions, users }) {
   }, [submissions]);
 
   const ageData = useMemo(() => {
-    const buckets = { "18\u201329": 0, "30\u201344": 0, "45\u201359": 0, "60+": 0, "Under 18": 0 };
+    const buckets = { "18-29": 0, "30-44": 0, "45-59": 0, "60+": 0 };
     submissions.forEach((s) => {
       const a = Number(s.age);
       if (!a) return;
-      if (a < 18) buckets["Under 18"]++;
-      else if (a < 30) buckets["18\u201329"]++;
-      else if (a < 45) buckets["30\u201344"]++;
-      else if (a < 60) buckets["45\u201359"]++;
+      if (a < 30) buckets["18-29"]++;
+      else if (a < 45) buckets["30-44"]++;
+      else if (a < 60) buckets["45-59"]++;
       else buckets["60+"]++;
     });
     return Object.entries(buckets).map(([name, value]) => ({ name, value }));
@@ -567,8 +588,39 @@ function AnalyticsDashboard({ submissions, users }) {
     return days;
   }, [submissions]);
 
+  const q = useMemo(() => {
+    const chronicOnly = submissions.filter((s) => s.hasChronic === "Yes");
+    const medsOnly = submissions.filter((s) => s.onMeds === "Yes");
+    return {
+      education: toChartData(countBy(submissions, (s) => s.education), EDUCATION),
+      employment: toChartData(countBy(submissions, (s) => s.employment), EMPLOYMENT),
+      marital: toChartData(countBy(submissions, (s) => s.marital), MARITAL),
+      income: toChartData(countBy(submissions, (s) => s.income), INCOME),
+      ethnicity: toChartData(countBy(submissions, (s) => s.ethnicity)),
+      religion: toChartData(countBy(submissions, (s) => s.religion)),
+      hasChronic: toChartData(countBy(submissions, (s) => s.hasChronic), ["Yes", "No"]),
+      conditionDuration: toChartData(countBy(chronicOnly, (s) => s.conditionDuration), DURATION),
+      onMeds: toChartData(countBy(submissions, (s) => s.onMeds), ["Yes", "No"]),
+      numMeds: toChartData(countBy(medsOnly, (s) => s.numMeds), NUM_MEDS),
+      toldMentalHealth: toChartData(countBy(submissions, (s) => s.toldMentalHealth), ["Yes", "No", "Unsure"]),
+      seenProfessional: toChartData(countBy(submissions, (s) => s.seenProfessional), ["Yes", "No"]),
+      substanceUse: Object.entries(countMultiBy(submissions, (s) => s.substanceUse)).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
+      stressfulEvents: toChartData(countBy(submissions, (s) => s.stressfulEvents), ["Yes", "No"]),
+      socialSupport: toChartData(countBy(submissions, (s) => s.socialSupport), SOCIAL_SUPPORT),
+      referralMade: toChartData(countBy(submissions, (s) => s.referralMade), ["Yes", "No"]),
+      functionalImpairment: toChartData(countBy(submissions, (s) => s.functionalImpairment), FUNCTIONAL_IMPAIRMENT),
+      phqItemAverages: PHQ_ITEMS.map((item, i) => {
+        const scores = submissions.map((s) => s.phq?.[i]).filter((v) => typeof v === "number");
+        const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+        return { name: `Q${i + 1}`, label: item.text, value: Number(avg.toFixed(2)) };
+      }),
+    };
+  }, [submissions]);
+
   const SEV_COLORS = [SEV.Minimal, SEV.Mild, SEV.Moderate, SEV["Moderately severe"], SEV.Severe];
   const SEX_COLORS = [C.primary, C.gold, C.inkSoft, "#7C9A93"];
+  const YESNO_COLORS = [C.primary, C.inkSoft, C.gold];
+  const PHQ_ITEM_COLORS = PHQ_ITEMS.map((_, i) => (i === 8 ? C.danger : C.primary));
 
   if (total === 0) {
     return (
@@ -605,78 +657,315 @@ function AnalyticsDashboard({ submissions, users }) {
         <StatCard icon={Users} label="Active RAs" value={new Set(submissions.map((s) => s.raUsername)).size} />
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        <ChartCard title="PHQ-9 Severity Distribution">
-          <ResponsiveContainer width="100%" height={260}>
-            <PieChart>
-              <Pie data={sevData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
-                {sevData.map((entry, i) => <Cell key={i} fill={SEV_COLORS[i]} />)}
-              </Pie>
-              <Tooltip />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </ChartCard>
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.inkSoft }}>Overview</h3>
+        <div className="grid lg:grid-cols-2 gap-4">
+          <ChartCard title="PHQ-9 Severity Distribution">
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie data={sevData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
+                  {sevData.map((entry, i) => <Cell key={i} fill={SEV_COLORS[i]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
 
-        <ChartCard title="Submissions \u2014 Last 14 Days">
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={trendData}>
-              <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-              <XAxis dataKey="date" tick={{ fontSize: 11, fill: C.inkSoft }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
-              <Tooltip />
-              <Line type="monotone" dataKey="count" stroke={C.primary} strokeWidth={2.5} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
+          <ChartCard title="Submissions \u2014 Last 14 Days">
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={trendData}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <Tooltip />
+                <Line type="monotone" dataKey="count" stroke={C.primary} strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
 
-        <ChartCard title="Age Distribution">
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={ageData}>
-              <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.inkSoft }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
-              <Tooltip />
-              <Bar dataKey="value" fill={C.primary} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
+          <ChartCard title="Data Collected per Research Assistant">
+            <ResponsiveContainer width="100%" height={Math.max(220, raData.length * 34)}>
+              <BarChart data={raData} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.primaryDark} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
 
-        <ChartCard title="Sex Distribution">
-          <ResponsiveContainer width="100%" height={240}>
-            <PieChart>
-              <Pie data={sexData} dataKey="value" nameKey="name" outerRadius={85}>
-                {sexData.map((entry, i) => <Cell key={i} fill={SEX_COLORS[i % SEX_COLORS.length]} />)}
-              </Pie>
-              <Tooltip />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </ChartCard>
+          <ChartCard title="Referral Made (Administrator Record)">
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={q.referralMade} dataKey="value" nameKey="name" outerRadius={85}>
+                  {q.referralMade.map((entry, i) => <Cell key={i} fill={YESNO_COLORS[i % YESNO_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+      </div>
 
-        <ChartCard title="Chronic Conditions Reported">
-          <ResponsiveContainer width="100%" height={Math.max(220, chronicData.length * 34)}>
-            <BarChart data={chronicData} layout="vertical" margin={{ left: 24 }}>
-              <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
-              <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: C.inkSoft }} />
-              <Tooltip />
-              <Bar dataKey="value" fill={C.gold} radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.inkSoft }}>Socio-Demographic Information</h3>
+        <div className="grid lg:grid-cols-2 gap-4">
+          <ChartCard title="Age Distribution">
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={ageData}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.primary} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
 
-        <ChartCard title="Data Collected per Research Assistant">
-          <ResponsiveContainer width="100%" height={Math.max(220, raData.length * 34)}>
-            <BarChart data={raData} layout="vertical" margin={{ left: 24 }}>
-              <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
-              <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: C.inkSoft }} />
-              <Tooltip />
-              <Bar dataKey="value" fill={C.primaryDark} radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
+          <ChartCard title="Sex Distribution">
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={sexData} dataKey="value" nameKey="name" outerRadius={85}>
+                  {sexData.map((entry, i) => <Cell key={i} fill={SEX_COLORS[i % SEX_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Highest Level of Education">
+            <ResponsiveContainer width="100%" height={Math.max(220, q.education.length * 34)}>
+              <BarChart data={q.education} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 10, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.primary} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Employment Status">
+            <ResponsiveContainer width="100%" height={Math.max(220, q.employment.length * 34)}>
+              <BarChart data={q.employment} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 10, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.gold} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Marital Status">
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={q.marital} dataKey="value" nameKey="name" outerRadius={85}>
+                  {q.marital.map((entry, i) => <Cell key={i} fill={SEX_COLORS[i % SEX_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Monthly Household Income">
+            <ResponsiveContainer width="100%" height={Math.max(220, q.income.length * 34)}>
+              <BarChart data={q.income} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 10, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.primaryDark} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Ethnicity / Tribe">
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={q.ethnicity} dataKey="value" nameKey="name" outerRadius={85}>
+                  {q.ethnicity.map((entry, i) => <Cell key={i} fill={SEX_COLORS[i % SEX_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Religion">
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={q.religion} dataKey="value" nameKey="name" outerRadius={85}>
+                  {q.religion.map((entry, i) => <Cell key={i} fill={SEX_COLORS[i % SEX_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.inkSoft }}>Clinical &amp; Health Information</h3>
+        <div className="grid lg:grid-cols-2 gap-4">
+          <ChartCard title="Has a Chronic Medical Condition">
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={q.hasChronic} dataKey="value" nameKey="name" outerRadius={80}>
+                  {q.hasChronic.map((entry, i) => <Cell key={i} fill={YESNO_COLORS[i % YESNO_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Chronic Conditions Reported">
+            <ResponsiveContainer width="100%" height={Math.max(220, chronicData.length * 34)}>
+              <BarChart data={chronicData} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.gold} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Duration of Chronic Condition(s)">
+            <ResponsiveContainer width="100%" height={Math.max(200, q.conditionDuration.length * 34)}>
+              <BarChart data={q.conditionDuration} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 10, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.primary} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Currently on Regular Medications">
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={q.onMeds} dataKey="value" nameKey="name" outerRadius={80}>
+                  {q.onMeds.map((entry, i) => <Cell key={i} fill={YESNO_COLORS[i % YESNO_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Number of Medications">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={q.numMeds}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.gold} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Ever Told Has a Mental Health Condition">
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={q.toldMentalHealth} dataKey="value" nameKey="name" outerRadius={80}>
+                  {q.toldMentalHealth.map((entry, i) => <Cell key={i} fill={YESNO_COLORS[i % YESNO_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Ever Seen a Mental Health Professional">
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={q.seenProfessional} dataKey="value" nameKey="name" outerRadius={80}>
+                  {q.seenProfessional.map((entry, i) => <Cell key={i} fill={YESNO_COLORS[i % YESNO_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Substance Use">
+            <ResponsiveContainer width="100%" height={Math.max(200, q.substanceUse.length * 34)}>
+              <BarChart data={q.substanceUse} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 10, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.danger} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Major Stressful Life Events (past 12 months)">
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={q.stressfulEvents} dataKey="value" nameKey="name" outerRadius={80}>
+                  {q.stressfulEvents.map((entry, i) => <Cell key={i} fill={YESNO_COLORS[i % YESNO_COLORS.length]} />)}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Overall Social Support Rating">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={q.socialSupport} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.primaryDark} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.inkSoft }}>PHQ-9 Item-Level Analysis</h3>
+        <div className="grid lg:grid-cols-2 gap-4">
+          <ChartCard title="Average Score per PHQ-9 Item (scale 0\u20133)">
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={q.phqItemAverages} layout="vertical" margin={{ left: 8 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" domain={[0, 3]} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={36} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <Tooltip formatter={(value, n, p) => [value, p?.payload?.label || n]} />
+                <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                  {q.phqItemAverages.map((entry, i) => <Cell key={i} fill={PHQ_ITEM_COLORS[i]} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <p className="text-xs mt-2" style={{ color: C.inkSoft }}>Item 9 (suicidal ideation) shown in red — even a low average reflects a safety-critical symptom present in the sample.</p>
+          </ChartCard>
+
+          <ChartCard title="Q10. Functional Impairment">
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={q.functionalImpairment} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.inkSoft }} />
+                <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10, fill: C.inkSoft }} />
+                <Tooltip />
+                <Bar dataKey="value" fill={C.gold} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
       </div>
     </div>
   );
