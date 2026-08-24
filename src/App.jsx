@@ -445,22 +445,22 @@ function Shell({ session, page, setPage, onLogout, children, flagCount }) {
   return (
     <div className="min-h-screen" style={{ backgroundColor: C.bg }}>
       <div style={{ backgroundColor: C.primaryDark }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(255,255,255,0.15)" }}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.15)" }}>
               <Shield color="#fff" size={17} />
             </div>
-            <div>
-              <div className="text-white text-sm font-serif leading-tight">Tema Urban Hospital</div>
-              <div className="text-xs leading-tight" style={{ color: "#BFE0D8" }}>QI &amp; IPC Research Portal</div>
+            <div className="min-w-0">
+              <div className="text-white text-sm font-serif leading-tight truncate">Tema Urban Hospital</div>
+              <div className="text-xs leading-tight truncate" style={{ color: "#BFE0D8" }}>QI &amp; IPC Research Portal</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <div className="text-right hidden sm:block">
               <div className="text-white text-sm font-medium">{session.name}</div>
               <div className="text-xs capitalize" style={{ color: "#BFE0D8" }}>{session.role === "ra" ? "Research Assistant" : session.role}</div>
             </div>
-            <button onClick={onLogout} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium" style={{ backgroundColor: "rgba(255,255,255,0.12)", color: "#fff" }}>
+            <button onClick={onLogout} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.12)", color: "#fff" }}>
               <LogOut size={14} /> Sign out
             </button>
           </div>
@@ -1054,8 +1054,10 @@ function RecordsTable({ submissions, users, session, scope, onReview }) {
           <h2 className="text-2xl font-serif" style={{ color: C.ink }}>{scope === "own" ? "My Records" : "All Records"}</h2>
           <p className="text-sm mt-0.5" style={{ color: C.inkSoft }}>{list.length} record{list.length !== 1 ? "s" : ""}</p>
         </div>
-        <div className="flex gap-2">
-          <TextInput placeholder="Search by Participant ID / OPD No." value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <div className="flex-1 min-w-[180px]">
+            <TextInput placeholder="Search by Participant ID / OPD No." value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
           <button
             onClick={() => exportToExcel(list, users, scope === "own" ? "TUH_My_Data" : "TUH_QI_Data")}
             disabled={list.length === 0}
@@ -1393,8 +1395,8 @@ function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-2xl font-serif" style={{ color: C.ink }}>New Questionnaire</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <h2 className="text-xl sm:text-2xl font-serif" style={{ color: C.ink }}>New Questionnaire</h2>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: C.primarySoft, color: C.primaryDark }}>
             <Timer size={13} /> {formatDuration(elapsedSeconds)} elapsed
