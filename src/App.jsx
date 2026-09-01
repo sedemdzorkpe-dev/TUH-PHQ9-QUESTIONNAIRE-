@@ -1034,7 +1034,7 @@ function SeverityActionGuide({ highlightScore }) {
 }
 
 /* ============================== RECORDS TABLE ============================== */
-function RecordsTable({ submissions, users, session, scope, onReview }) {
+function RecordsTable({ submissions, users, session, scope, onReview, onDelete }) {
   const [q, setQ] = useState("");
   const list = useMemo(() => {
     let base = scope === "own" ? submissions.filter((s) => s.raUsername === session.username) : submissions;
@@ -1077,7 +1077,7 @@ function RecordsTable({ submissions, users, session, scope, onReview }) {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ backgroundColor: C.surfaceAlt }}>
-                  {["Participant ID", "Date", "RA", "Age/Sex", "PHQ-9", "Severity", "Duration", "Flag", "Reviewed"].map((h) => (
+                  {["Participant ID", "Date", "RA", "Age/Sex", "PHQ-9", "Severity", "Duration", "Flag", "Reviewed", ...(onDelete ? [""] : [])].map((h) => (
                     <th key={h} className="text-left px-4 py-2.5 font-semibold whitespace-nowrap" style={{ color: C.inkSoft }}>{h}</th>
                   ))}
                 </tr>
@@ -1114,6 +1114,20 @@ function RecordsTable({ submissions, users, session, scope, onReview }) {
                         <span style={{ color: C.inkSoft }}>—</span>
                       )}
                     </td>
+                    {onDelete && (
+                      <td className="px-4 py-2.5">
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Permanently delete record ${s.participantId}? This cannot be undone.`)) onDelete(s.id);
+                          }}
+                          title="Delete this record"
+                          className="p-1.5 rounded-md"
+                          style={{ color: C.danger }}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -1341,7 +1355,15 @@ const BLANK_FORM = {
 function QuestionnaireWizard({ session, submissions, onSubmit, onCancel }) {
   const [step, setStep] = useState(0);
   const [f, setF] = useState(() => {
-    const n = submissions.filter((s) => s.raUsername === session.username).length + 1;
+    // Continue this RA's own numbering from the highest TUH-#### they've used so far,
+    // not just a raw count — so it stays correct even if an ID was ever hand-edited
+    // or an individual record was later removed.
+    const mine = submissions.filter((s) => s.raUsername === session.username);
+    const highest = mine.reduce((max, s) => {
+      const m = /^TUH-(\d+)$/i.exec((s.participantId || "").trim());
+      return m ? Math.max(max, parseInt(m[1], 10)) : max;
+    }, 0);
+    const n = highest + 1;
     return { ...BLANK_FORM, participantId: `TUH-${String(n).padStart(4, "0")}` };
   });
   const [startedAt] = useState(() => new Date().toISOString());
@@ -1753,6 +1775,15 @@ export default function TemaQIApp() {
     try { await updateDoc(doc(db, "submissions", id), { reviewed }); }
     catch (e) { console.warn(e); showToast("Could not update that record.", "error"); }
   }
+  async function handleDeleteSubmission(id) {
+    try {
+      await deleteDoc(doc(db, "submissions", id));
+      showToast("Record deleted.");
+    } catch (e) {
+      console.warn(e);
+      showToast("Could not delete that record \u2014 check your connection and try again.", "error");
+    }
+  }
   async function handleClearAllSubmissions() {
     try {
       await Promise.all(submissions.map((s) => deleteDoc(doc(db, "submissions", s.id))));
@@ -1781,7 +1812,7 @@ export default function TemaQIApp() {
         <AnalyticsDashboard submissions={submissions} users={users} />
       )}
       {page === "records" && session.role !== "ra" && (
-        <RecordsTable submissions={submissions} users={users} session={session} scope="all" onReview={session.role === "admin" ? handleReview : session.role === "director" ? handleReview : null} />
+        <RecordsTable submissions={submissions} users={users} session={session} scope="all" onReview={session.role === "admin" ? handleReview : session.role === "director" ? handleReview : null} onDelete={session.role === "admin" ? handleDeleteSubmission : null} />
       )}
       {page === "users" && session.role === "admin" && (
         <ManageUsers users={users} onCreate={handleCreateUser} onToggleActive={handleToggleActive} onResetPassword={handleResetPassword} onDelete={handleDeleteUser} currentUsername={session.username} submissionCount={submissions.length} onClearSubmissions={handleClearAllSubmissions} />
